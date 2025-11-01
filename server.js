@@ -2,25 +2,55 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
-import connectDB from './config/database.js';
+import mongoose from 'mongoose';
 import contactRoutes from './routes/contacts.js';
 
 // Configurar variáveis de ambiente
 dotenv.config();
 
-// Conectar ao banco de dados
-connectDB();
-
 const app = express();
-const PORT = process.env.PORT || 3001;
+
+// Cache da conexão MongoDB para reutilização em serverless
+let cachedConnection = null;
+
+// Função para conectar ao MongoDB (otimizada para serverless)
+async function connectToDatabase() {
+  if (cachedConnection && mongoose.connection.readyState === 1) {
+    return cachedConnection;
+  }
+
+  try {
+    if (!process.env.MONGODB_URI) {
+      throw new Error('MONGODB_URI não está definida');
+    }
+
+    const options = {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10,
+      minPoolSize: 1,
+      maxIdleTimeMS: 30000,
+      bufferCommands: false
+    };
+
+    cachedConnection = await mongoose.connect(process.env.MONGODB_URI, options);
+    console.log('✅ MongoDB conectado');
+    return cachedConnection;
+  } catch (error) {
+    console.error('❌ Erro ao conectar MongoDB:', error.message);
+    throw error;
+  }
+}
 
 // Middlewares de segurança
-app.use(helmet());
+app.use(helmet({
+  crossOriginEmbedderPolicy: false
+}));
 
 // Configurar CORS
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL, 'https://techassist.vercel.app'] 
+  origin: process.env.NODE_ENV === 'production'
+    ? [process.env.FRONTEND_URL, 'https://techassist.vercel.app']
     : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -28,20 +58,31 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 // Middleware para parsing JSON
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Middleware de logging para desenvolvimento
-if (process.env.NODE_ENV !== 'production') {
-  app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+// Middleware para conectar ao banco antes de cada requisição
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
     next();
-  });
-}
+  } catch (error) {
+    console.error('Erro na conexão do banco:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro de conexão com o banco de dados'
+    });
+  }
+});
+
+// Middleware de logging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
 
 // Rotas da API
 app.use('/api/contacts', contactRoutes);
@@ -50,8 +91,22 @@ app.use('/api/contacts', contactRoutes);
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
-    message: 'Servidor funcionando corretamente',
-    timestamp: new Date().toISOString()
+    message: 'API funcionando corretamente',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Rota raiz
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'TechAssist API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      contacts: '/api/contacts'
+    }
   });
 });
 
@@ -59,7 +114,8 @@ app.get('/api/health', (req, res) => {
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Rota não encontrada'
+    message: 'Rota não encontrada',
+    path: req.originalUrl
   });
 });
 
@@ -68,33 +124,20 @@ app.use((error, req, res, next) => {
   console.error('Erro não tratado:', error);
   res.status(500).json({
     success: false,
-    message: 'Erro interno do servidor'
+    message: 'Erro interno do servidor',
+    ...(process.env.NODE_ENV !== 'production' && { error: error.message })
   });
 });
 
-// Iniciar servidor
-const server = app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-  if (process.env.NODE_ENV !== 'production') {
+// Para desenvolvimento local
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, async () => {
+    await connectToDatabase();
+    console.log(`Servidor rodando na porta ${PORT}`);
     console.log(`URL: http://localhost:${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/api/health`);
-  }
-});
-
-// Configuração para Vercel
-if (process.env.VERCEL) {
-  module.exports = app;
+  });
 }
-
-// Tratamento gracioso de shutdown
-process.on('SIGINT', () => {
-  console.log('\nRecebido SIGINT. Fechando servidor graciosamente...');
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  console.log('\nRecebido SIGTERM. Fechando servidor graciosamente...');
-  process.exit(0);
-});
 
 export default app;

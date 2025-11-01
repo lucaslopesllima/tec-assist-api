@@ -29,8 +29,21 @@ Backend para landing page da TechAssist - API de contatos com MongoDB.
 
 4. **Deploy**
    ```bash
+   # Primeiro deploy
+   vercel
+   
+   # Deploy para produção
    vercel --prod
    ```
+
+### Estrutura para Vercel
+```
+/api
+  ├── index.js     # Função principal
+  └── health.js    # Health check endpoint
+server.js          # Aplicação Express
+vercel.json        # Configuração do Vercel
+```
 
 ## 📋 Endpoints da API
 
