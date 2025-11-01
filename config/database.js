@@ -13,8 +13,6 @@ const connectDB = async () => {
     
     
     const options = {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 30000, 
       socketTimeoutMS: 45000, 
       family: 4, 
