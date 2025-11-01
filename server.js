@@ -18,11 +18,16 @@ const PORT = process.env.PORT || 3001;
 app.use(helmet());
 
 // Configurar CORS
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? [process.env.FRONTEND_URL, 'https://techassist.vercel.app'] 
+    : '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 app.options('*', cors());
 
@@ -68,11 +73,18 @@ app.use((error, req, res, next) => {
 });
 
 // Iniciar servidor
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`URL: http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`URL: http://localhost:${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/api/health`);
+  }
 });
+
+// Configuração para Vercel
+if (process.env.VERCEL) {
+  module.exports = app;
+}
 
 // Tratamento gracioso de shutdown
 process.on('SIGINT', () => {
